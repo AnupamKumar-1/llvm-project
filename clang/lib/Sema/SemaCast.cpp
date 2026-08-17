@@ -524,7 +524,7 @@ Sema::deduceCastPointerAttributes(QualType ResultType, QualType SrcType) {
                                          MergePointeeTy)) {
         // SrcTy is __terminated_by(), update the pointee and inherit the
         // __terminated_by().
-        assert(!DVTT && SPTy->isSingle());
+        assert(!DVTT && SPTy->getPointerAttributes().isSingle());
         QualType Ty = Context.getPointerType(
             MergePointeeTy, BoundsSafetyPointerAttributes::single());
         Ty = Context.getAttributedType(attr::PtrSingle, Ty, Ty);
