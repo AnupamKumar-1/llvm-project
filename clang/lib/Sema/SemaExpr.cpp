@@ -11577,12 +11577,19 @@ hasCompatibleNestedBoundsSafetyPointerAttributesSugarAware(QualType LHSType,
 // routine is it effectively iqnores the qualifiers on the top level pointee.
 // This circumvents the usual type rules specified in 6.2.7p1 & 6.7.5.[1-3].
 // FIXME: add a couple examples in this comment.
-static AssignConvertType checkPointerTypesForAssignment(Sema &S,
-                                                        QualType LHSType,
-                                                        QualType RHSType,
-                                                        SourceLocation Loc) {
+static AssignConvertType checkPointerTypesForAssignment(
+    Sema &S, QualType LHSType, QualType RHSType, SourceLocation Loc,
+    QualType OrigLHSType = QualType(), QualType OrigRHSType = QualType()) {
   assert(LHSType.isCanonical() && "LHS not canonicalized!");
   assert(RHSType.isCanonical() && "RHS not canonicalized!");
+
+  /* TO_UPSTREAM(BoundsSafety) ON*/
+  if (S.getLangOpts().BoundsSafety && !OrigLHSType.isNull() &&
+      !OrigRHSType.isNull() &&
+      !hasCompatibleNestedBoundsSafetyPointerAttributesSugarAware(
+          OrigLHSType, OrigRHSType))
+    return AssignConvertType::IncompatibleNestedBoundsSafetyPointerAttributes;
+  /* TO_UPSTREAM(BoundsSafety) OFF*/
 
   // get the "pointed to" type (ignoring qualifiers at the top level)
   const Type *lhptee, *rhptee;
@@ -11976,9 +11983,7 @@ AssignConvertType Sema::CheckAssignmentConstraints(QualType LHSType,
     Kind = CK_NoOp;
     /* TO_UPSTREAM(BoundsSafety) ON*/
     if (getLangOpts().BoundsSafety &&
-        (!Context.canMergeTypeBounds(OrigLHSType, RHS.get()->getType()) ||
-         OrigLHSType->isSinglePointerType() !=
-             OrigRHSType->isSinglePointerType())) {
+        !Context.canMergeTypeBounds(OrigLHSType, RHS.get()->getType())) {
       Kind = CK_BoundsSafetyPointerCast;
     /* TO_UPSTREAM(BoundsSafety) OFF*/
     } else {
@@ -12265,15 +12270,9 @@ AssignConvertType Sema::CheckAssignmentConstraints(QualType LHSType,
         Kind = CK_NoOp;
       else
         Kind = CK_BitCast;
-      /* TO_UPSTREAM(BoundsSafety) ON*/
-      if (getLangOpts().BoundsSafety &&
-          !hasCompatibleNestedBoundsSafetyPointerAttributesSugarAware(
-              OrigLHSType, OrigRHSType))
-        return AssignConvertType::
-            IncompatibleNestedBoundsSafetyPointerAttributes;
-      /* TO_UPSTREAM(BoundsSafety) OFF*/
       return checkPointerTypesForAssignment(*this, LHSType, RHSType,
-                                            RHS.get()->getBeginLoc());
+                                            RHS.get()->getBeginLoc(),
+                                            OrigLHSType, OrigRHSType);
     }
 
     // int -> T*
