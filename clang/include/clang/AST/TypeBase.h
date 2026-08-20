@@ -3702,12 +3702,16 @@ public:
     return !(FAttr.isUnsafeIndexable() || FAttr.isUnspecified());
   }
 
-  bool isSingle() const { return FAttr.isSingle(); }
   bool isIndexable() const { return FAttr.isIndexable(); }
   bool isBidiIndexable() const { return FAttr.isBidiIndexable(); }
   bool isUnsafeIndexable() const { return FAttr.isUnsafeIndexable(); }
   bool isUnspecified() const { return FAttr.isUnspecified(); }
 
+private:
+  using Type::isSinglePointerType;
+  using Type::isUnsafeIndexablePointerType;
+
+public:
   void Profile(llvm::FoldingSetNodeID &ID) {
     Profile(ID, getPointeeType(), getPointerAttributes());
   }
@@ -9196,7 +9200,7 @@ inline bool Type::isSinglePointerType() const {
   const auto *PT = dyn_cast<PointerType>(CanonicalType);
   if (!PT)
     return false;
-  if (PT->isSingle())
+  if (PT->getPointerAttributes().isSingle())
     return true;
   if (PT->isUnspecified() && hasAttr(attr::PtrSingle))
     return true;
