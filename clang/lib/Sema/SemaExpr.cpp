@@ -10418,6 +10418,18 @@ static bool checkConditionalNullPointer(Sema &S, ExprResult &NullExpr,
   return false;
 }
 
+static std::optional<BoundsSafetyPointerAttributes>
+getSugarAwareBoundsSafetyPointerAttributes(QualType T) {
+  const auto *PT = T->getAs<PointerType>();
+  if (!PT)
+    return std::nullopt;
+  if (T->isSinglePointerType())
+    return BoundsSafetyPointerAttributes::single();
+  if (T->isUnsafeIndexablePointerType())
+    return BoundsSafetyPointerAttributes::unsafeIndexable();
+  return PT->getPointerAttributes();
+}
+
 /// Checks compatibility between two pointers and return the resulting
 /// type.
 static QualType checkConditionalPointerCompatibility(Sema &S, ExprResult &LHS,
@@ -10468,8 +10480,8 @@ static QualType checkConditionalPointerCompatibility(Sema &S, ExprResult &LHS,
     // 4) __single
     // The operands are considered incompatible if an operand has unsafe pointer
     // type and the other has bounds.
-    auto lFPAttr = LHSTy->castAs<PointerType>()->getPointerAttributes();
-    auto rFPAttr = RHSTy->castAs<PointerType>()->getPointerAttributes();
+    auto lFPAttr = *getSugarAwareBoundsSafetyPointerAttributes(LHSTy);
+    auto rFPAttr = *getSugarAwareBoundsSafetyPointerAttributes(RHSTy);
     CompositeFPAttr = BoundsSafetyPointerAttributes::merge(lFPAttr, rFPAttr);
     /* TO_UPSTREAM(BoundsSafety) OFF*/
   }
@@ -10675,9 +10687,9 @@ checkConditionalObjectPointersCompatibility(Sema &S, ExprResult &LHS,
   // Do -fbounds-safety pointer conversions ahead of any other conversions; otherwise
   // we risk doing a BitCast across pointer attributes, which is bad.
   BoundsSafetyPointerAttributes lFPAttr =
-      LHSTy->castAs<PointerType>()->getPointerAttributes();
+      *getSugarAwareBoundsSafetyPointerAttributes(LHSTy);
   BoundsSafetyPointerAttributes rFPAttr =
-      RHSTy->castAs<PointerType>()->getPointerAttributes();
+      *getSugarAwareBoundsSafetyPointerAttributes(RHSTy);
   destFPAttr = BoundsSafetyPointerAttributes::merge(lFPAttr, rFPAttr);
 
   // If either type is value terminated, the other also needs to be, meaning
@@ -11538,17 +11550,46 @@ static bool checkBoundsSafetyFunctionPointerForAssignment(Sema &S,
 }
 /* TO_UPSTREAM(BoundsSafety) OFF*/
 
+static bool
+hasCompatibleNestedBoundsSafetyPointerAttributesSugarAware(QualType LHSType,
+                                                           QualType RHSType) {
+  const auto *LHSPtr = LHSType->getAs<PointerType>();
+  const auto *RHSPtr = RHSType->getAs<PointerType>();
+  if (!LHSPtr || !RHSPtr)
+    return true;
+
+  QualType LPointee = LHSPtr->getPointeeType();
+  QualType RPointee = RHSPtr->getPointeeType();
+  for (;;) {
+    auto LAttrs = getSugarAwareBoundsSafetyPointerAttributes(LPointee);
+    auto RAttrs = getSugarAwareBoundsSafetyPointerAttributes(RPointee);
+    if (!LAttrs || !RAttrs)
+      return true;
+    if (!BoundsSafetyPointerAttributes::areCompatible(*LAttrs, *RAttrs))
+      return false;
+    LPointee = LPointee->getAs<PointerType>()->getPointeeType();
+    RPointee = RPointee->getAs<PointerType>()->getPointeeType();
+  }
+}
+
 // checkPointerTypesForAssignment - This is a very tricky routine (despite
 // being closely modeled after the C99 spec:-). The odd characteristic of this
 // routine is it effectively iqnores the qualifiers on the top level pointee.
 // This circumvents the usual type rules specified in 6.2.7p1 & 6.7.5.[1-3].
 // FIXME: add a couple examples in this comment.
-static AssignConvertType checkPointerTypesForAssignment(Sema &S,
-                                                        QualType LHSType,
-                                                        QualType RHSType,
-                                                        SourceLocation Loc) {
+static AssignConvertType checkPointerTypesForAssignment(
+    Sema &S, QualType LHSType, QualType RHSType, SourceLocation Loc,
+    QualType OrigLHSType = QualType(), QualType OrigRHSType = QualType()) {
   assert(LHSType.isCanonical() && "LHS not canonicalized!");
   assert(RHSType.isCanonical() && "RHS not canonicalized!");
+
+  /* TO_UPSTREAM(BoundsSafety) ON*/
+  if (S.getLangOpts().BoundsSafety && !OrigLHSType.isNull() &&
+      !OrigRHSType.isNull() &&
+      !hasCompatibleNestedBoundsSafetyPointerAttributesSugarAware(
+          OrigLHSType, OrigRHSType))
+    return AssignConvertType::IncompatibleNestedBoundsSafetyPointerAttributes;
+  /* TO_UPSTREAM(BoundsSafety) OFF*/
 
   // get the "pointed to" type (ignoring qualifiers at the top level)
   const Type *lhptee, *rhptee;
@@ -11930,6 +11971,7 @@ AssignConvertType Sema::CheckAssignmentConstraints(QualType LHSType,
                                                    bool ConvertRHS) {
   QualType RHSType = RHS.get()->getType();
   QualType OrigLHSType = LHSType;
+  QualType OrigRHSType = RHSType;
 
   // Get canonical types.  We're not formatting these types, just comparing
   // them.
@@ -12229,7 +12271,8 @@ AssignConvertType Sema::CheckAssignmentConstraints(QualType LHSType,
       else
         Kind = CK_BitCast;
       return checkPointerTypesForAssignment(*this, LHSType, RHSType,
-                                            RHS.get()->getBeginLoc());
+                                            RHS.get()->getBeginLoc(),
+                                            OrigLHSType, OrigRHSType);
     }
 
     // int -> T*

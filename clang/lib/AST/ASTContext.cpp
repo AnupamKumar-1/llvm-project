@@ -16003,6 +16003,9 @@ ASTContext::canMergeTypeBounds(QualType LHSTy, QualType RHSTy) const {
   if (TermCheck != BSPTMK_CanMerge)
     return TermCheck;
 
+  if (LHSTy->isSinglePointerType() != RHSTy->isSinglePointerType())
+    return ASTContext::BSPTMK_NestedBoundsMismatch;
+
   auto LHSPointerTy = LHSTy->getAs<PointerType>();
   auto RHSPointerTy = RHSTy->getAs<PointerType>();
   assert(!!LHSPointerTy == !!RHSPointerTy);
